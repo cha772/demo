@@ -1,0 +1,1941 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GPG 签名校验 原型</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23016BFF'/%3E%3Cpath d='M18 32l9 9 19-19' fill='none' stroke='white' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+    /* Reset & Base */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'PingFang SC', 'Microsoft Yahei', Helvetica, Arial, sans-serif; font-size: 14px; color: #313238; background: #F5F9FF; }
+    a { color: var(--color-primary); text-decoration: none; cursor: pointer; }
+    a:hover { text-decoration: underline; }
+    
+    /* UI Variables */
+    :root {
+        --color-primary: #016BFF;
+        --color-success: #14AB5B;
+        --color-warning: #FFB848;
+        --color-danger: #EA3736;
+        --color-secondary: #8797AA;
+        --color-dark: #081E40;
+        --color-text-main: #313238;
+        --color-text-sub: #63656E;
+        --color-border: #DCDEE5;
+        --color-bg: #F5F9FF;
+        --color-th: #FAFCFF;
+        --nav-height: 60px;
+        --sidebar-layout-b-width: 160px;
+        --btn-h: 30px;
+        --radius: 4px;
+        --radius-lg: 8px;
+    }
+
+    /* Prototype Navigation */
+    #proto-nav { 
+        background: #EAEBF0; padding: 10px; display: flex; gap: 10px; border-bottom: 2px solid #ccc; 
+        position: fixed; top: 0; left: 0; right: 0; z-index: 2000; height: 50px;
+    }
+    .proto-tab { padding: 6px 12px; background: #fff; border: 1px solid #ccc; cursor: pointer; border-radius: var(--radius); font-size: 13px; outline: none; }
+    .proto-tab:hover { background: #f0f0f0; }
+    .proto-tab.active { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+
+    /* Layout Shells */
+    .page { display: none; padding-top: 50px; min-height: 100vh; position: relative; }
+    .page.active { display: block; }
+    
+    /* Layout A */
+    .layout-a .header { height: var(--nav-height); background: var(--color-dark); color: #fff; display: flex; align-items: center; padding: 0 20px; position: fixed; top: 50px; left: 0; right: 0; z-index: 100; font-size: 16px; font-weight: bold; }
+    .layout-a .sidebar { width: 240px; background: #fff; border-right: 1px solid var(--color-border); position: fixed; top: calc(50px + var(--nav-height)); bottom: 0; left: 0; padding: 10px 0; }
+    .layout-a .content { margin-left: 240px; padding: 20px; padding-top: calc(20px + var(--nav-height)); }
+    .nav-item { padding: 12px 20px; cursor: pointer; color: var(--color-text-main); }
+    .nav-item:hover { background: var(--color-bg); }
+    .nav-item.active { background: #E1ECFF; color: var(--color-primary); font-weight: bold; border-right: 3px solid var(--color-primary); }
+
+    /* Layout B */
+    .layout-b .sidebar { width: var(--sidebar-layout-b-width); background: #fff; border-right: 1px solid var(--color-border); position: fixed; top: 50px; bottom: 0; left: 0; }
+    .layout-b .sidebar-header { height: 52px; background: var(--color-dark); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 16px; }
+    .layout-b .nav-item { padding: 12px 20px; font-size: 14px; }
+    .layout-b .content { margin-left: var(--sidebar-layout-b-width); padding: 20px; background: #fff; min-height: calc(100vh - 50px); }
+
+    /* Components */
+    .panel { background: #fff; border: 1px solid var(--color-border); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+    .panel-title { font-size: 16px; font-weight: bold; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+    
+    .btn { height: var(--btn-h); padding: 0 16px; border-radius: var(--radius); font-size: 14px; cursor: pointer; border: 1px solid var(--color-border); background: #fff; color: var(--color-text-main); outline: none; display: inline-flex; align-items: center; justify-content: center; }
+    .btn:hover:not(:disabled) { border-color: var(--color-secondary); color: var(--color-primary); }
+    .btn-primary { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+    .btn-primary:hover:not(:disabled) { background: #0056CC; border-color: #0056CC; color: #fff; }
+    .btn-danger { background: var(--color-danger); color: #fff; border-color: var(--color-danger); }
+    .btn-danger:hover:not(:disabled) { background: #D32F2F; border-color: #D32F2F; color: #fff; }
+    .btn:disabled { background: #F5F7F9; color: #BDC6D0; cursor: not-allowed; border-color: var(--color-border); }
+    
+    .table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+    .table th, .table td { padding: 12px; text-align: left; border-bottom: 1px solid var(--color-border); }
+    .table th { background: var(--color-th); font-weight: bold; color: var(--color-text-sub); height: 40px; }
+    .table tr:hover td { background: var(--color-bg); }
+    
+    /* Status Colors */
+    .text-success { color: var(--color-success); }
+    .text-warning { color: var(--color-warning); }
+    .text-danger { color: var(--color-danger); }
+    .text-muted { color: var(--color-secondary); }
+
+    /* Modals */
+    .modal-mask { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 999; }
+    .modal { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; border-radius: var(--radius-lg); width: 480px; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.15); flex-direction: column; }
+    .modal-header { padding: 16px 20px; border-bottom: 1px solid var(--color-border); font-size: 16px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+    .modal-close { cursor: pointer; font-size: 20px; color: var(--color-text-sub); border: none; background: transparent; }
+    .modal-close:hover { color: var(--color-danger); }
+    .modal-body { padding: 20px; max-height: 60vh; overflow-y: auto; }
+    .modal-footer { padding: 12px 20px; border-top: 1px solid var(--color-border); text-align: right; background: #fafafa; border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+    .modal-footer .btn { margin-left: 10px; }
+
+    /* Forms & Inputs */
+    .form-group { margin-bottom: 16px; }
+    .form-label { display: block; margin-bottom: 8px; color: var(--color-text-sub); }
+    .form-control { width: 100%; padding: 8px 12px; border: 1px solid var(--color-border); border-radius: var(--radius); font-size: 14px; outline: none; }
+    .form-control:focus { border-color: var(--color-primary); box-shadow: 0 0 0 2px rgba(1,107,255,0.1); }
+    textarea.form-control { min-height: 120px; resize: vertical; font-family: monospace; }
+    
+    .radio-group, .checkbox-group { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer; }
+    .radio-group input, .checkbox-group input { margin-right: 4px; cursor: pointer; }
+    .radio-group.disabled { color: var(--color-secondary); cursor: not-allowed; }
+    .radio-group.disabled input { cursor: not-allowed; }
+
+    /* Switch / Toggle */
+    .switch { position: relative; display: inline-block; width: 44px; height: 22px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .3s; border-radius: 22px; }
+    .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
+    input:checked + .slider { background-color: var(--color-primary); }
+    input:checked + .slider:before { transform: translateX(22px); }
+
+    /* Code block */
+    .code-block { background: #f4f4f4; padding: 10px; border-radius: var(--radius); font-family: monospace; font-size: 12px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .code-block code { color: #d63384; word-break: break-all; }
+
+    /* Badges */
+    .badge { display: inline-flex; align-items: center; padding: 2px 6px; border-radius: 10px; font-size: 12px; font-weight: normal; border: 1px solid transparent; }
+    .badge-verified-local { color: var(--color-success); border-color: var(--color-success); background: #E7F6ED; }
+    .badge-verified-platform { color: var(--color-primary); border-color: var(--color-primary); background: #E1ECFF; }
+    .badge-unverified { color: var(--color-warning); border-color: var(--color-warning); background: #FFF4E2; }
+    .badge-unsigned { color: var(--color-secondary); border-color: var(--color-border); background: #F5F7F9; }
+
+    /* Tooltips */
+    .tooltip-container { position: relative; display: inline-block; cursor: help; }
+    .tooltip { position: fixed; background: #333; color: #fff; padding: 8px 12px; border-radius: var(--radius); font-size: 12px; z-index: 3000; opacity: 0; pointer-events: none; transition: opacity 0.2s; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+    .tooltip.show { opacity: 1; }
+
+    /* Utilities */
+    .mt-10 { margin-top: 10px; }
+    .mt-20 { margin-top: 20px; }
+    .mb-20 { margin-bottom: 20px; }
+    .d-flex { display: flex; }
+    .align-center { align-items: center; }
+    .justify-between { justify-content: space-between; }
+    .gap-10 { gap: 10px; }
+    .text-sm { font-size: 12px; }
+    
+    /* Global Banner */
+    .global-banner { background: #E1ECFF; border: 1px solid var(--color-primary); color: var(--color-primary); padding: 10px 16px; border-radius: var(--radius); margin-bottom: 16px; display: none; }
+    
+    /* GPG Detail Card */
+    .gpg-detail-card { border: 1px solid var(--color-success); border-radius: var(--radius); padding: 16px; background: #FAFCFF; }
+    .gpg-detail-card.warning { border-color: var(--color-warning); background: #FFF4E2; }
+    .gpg-detail-card.unsigned { border-color: var(--color-border); background: #F5F7F9; }
+
+    /* Page 1 GPG Cards */
+    .gpg-card-list { display: flex; flex-direction: column; gap: 16px; }
+    .gpg-key-card { border: 1px solid #D0D7DE; border-radius: 12px; background: #fff; overflow: hidden; padding: 22px 28px; }
+    .gpg-key-card-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+    .gpg-key-main { display: flex; align-items: flex-start; gap: 18px; min-width: 0; flex: 1; }
+    .gpg-key-visual { width: 132px; display: flex; flex-direction: column; align-items: center; gap: 10px; flex-shrink: 0; }
+    .gpg-key-icon { width: 56px; height: 56px; border-radius: 50%; border: 3px solid #24292F; display: inline-flex; align-items: center; justify-content: center; font-size: 26px; color: #24292F; }
+    .gpg-key-type { min-width: 78px; height: 38px; padding: 0 16px; border: 1px solid #D0D7DE; border-radius: 12px; background: #fff; color: #57606A; display: inline-flex; align-items: center; justify-content: center; font-size: 16px; }
+    .gpg-key-copy { display: inline-flex; align-items: center; padding: 0 8px; min-height: 30px; border: 1px solid #D0D7DE; border-radius: 10px; background: #F6F8FA; color: #24292F; font-size: 13px; }
+    .gpg-key-card-body { padding: 0; display: block; flex: 1; }
+    .gpg-field-label { font-size: 12px; color: #979BA5; margin-bottom: 4px; }
+    .gpg-field-value { color: #24292F; line-height: 20px; }
+    .gpg-key-title { font-size: 15px; font-weight: 600; color: #24292F; margin-bottom: 6px; }
+    .gpg-key-meta { font-size: 15px; color: #24292F; line-height: 1.6; }
+    .gpg-key-meta strong { font-weight: 700; }
+    .gpg-key-added { margin-top: 8px; font-size: 15px; color: #57606A; }
+    .gpg-key-actions { display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; }
+    .gpg-key-delete { min-width: 96px; height: 54px; border: 1px solid #D0D7DE; border-radius: 14px; background: #fff; color: #CF222E; font-size: 18px; cursor: pointer; }
+    .gpg-key-delete:hover { background: #FFF1F2; }
+
+    /* Signature popover */
+    .signature-popover { position: fixed; width: 320px; background: #fff; border: 1px solid #DDE4EB; border-radius: 8px; box-shadow: 0 8px 24px rgba(15, 35, 95, 0.12); padding: 14px 16px; z-index: 3200; display: none; }
+    .signature-popover.show { display: block; }
+    .signature-popover-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: #313238; margin-bottom: 10px; }
+    .signature-popover-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-success); }
+    .signature-popover.warning .signature-popover-dot { background: var(--color-warning); }
+    .signature-popover.unsigned .signature-popover-dot { background: #979BA5; }
+    .signature-popover-grid { display: grid; grid-template-columns: 78px 1fr; gap: 6px 8px; font-size: 12px; color: #63656E; }
+    .signature-popover-grid strong { color: #313238; font-weight: 500; }
+    .signature-popover-desc { margin-top: 10px; font-size: 12px; color: #63656E; line-height: 20px; }
+</style>
+</head>
+<body>
+
+    <!-- Prototype Top Nav -->
+    <div id="proto-nav">
+        <button class="proto-tab active" data-target="page1" onclick="showPage('page1')">个人中心-GPG公钥</button>
+        <button class="proto-tab" data-target="page2" onclick="showPage('page2')">仓库设置-推送设置</button>
+        <button class="proto-tab" data-target="page3" onclick="showPage('page3')">系统设置-GPG配置</button>
+        <button class="proto-tab" data-target="page4" onclick="showPage('page4')">提交列表</button>
+        <button class="proto-tab" data-target="page5" onclick="showPage('page5')">提交详情</button>
+    </div>
+
+    <!-- ================= PAGE 1 ================= -->
+    <div id="page1" class="page layout-a active">
+        <div class="header">CCode 代码托管</div>
+        <div class="sidebar">
+            <div class="nav-item">个人资料</div>
+            <div class="nav-item">账号设置</div>
+            <div class="nav-item">SSH 公钥</div>
+            <div class="nav-item active">GPG 公钥</div>
+            <div class="nav-item">访问令牌</div>
+        </div>
+        <div class="content">
+            <div class="panel">
+                <div class="panel-title">
+                    <span>GPG 公钥管理</span>
+                    <div class="d-flex align-center gap-10">
+                        <a href="javascript:void(0)" class="text-sm" onclick="openModal('modal-guide')">如何生成？</a>
+                        <button class="btn btn-primary" onclick="openModal('modal-add-key')">添加 GPG 公钥</button>
+                    </div>
+                </div>
+                <p class="mb-20 text-muted">添加GPG公钥后，您可以对提交(Commit）进行加密签名，验证您的身份并防止代码被篡改。</p>
+                
+                <div class="gpg-card-list" id="gpg-table">
+                    <div class="gpg-key-card" id="row-1">
+                        <div class="gpg-key-card-header">
+                            <div class="gpg-key-main">
+                                <div class="gpg-key-visual">
+                                    <span class="gpg-key-icon">🔑</span>
+                                    <span class="gpg-key-type">GPG</span>
+                                </div>
+                                <div class="gpg-key-card-body">
+                                    <div class="gpg-key-title">Tony Chen</div>
+                                    <div class="gpg-key-meta"><strong>Email address:</strong> <span class="gpg-key-copy">6893640@qq.com</span></div>
+                                    <div class="gpg-key-meta"><strong>Key ID:</strong> 186C28910D157F06</div>
+                                    <div class="gpg-key-meta"><strong>算法：</strong> Ed25519</div>
+                                    <div class="gpg-key-meta"><strong>指纹：</strong> 186C28910D157F06</div>
+                                    <div class="gpg-key-meta"><strong>到期时间：</strong> 永不过期</div>
+                                    <div class="gpg-key-meta"><strong>Subkeys:</strong> 145BDC9AD3910C42</div>
+                                    <div class="gpg-key-added">Added on Apr 28, 2026</div>
+                                </div>
+                            </div>
+                            <div class="gpg-key-actions"><button class="gpg-key-delete" onclick="confirmDelete('row-1')">Delete</button></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= PAGE 2 ================= -->
+    <div id="page2" class="page">
+        <!-- Add scoped styles for page 2 -->
+        <style>
+            #page2 {
+                background: #fff;
+                padding-top: 50px; /* offset for proto-nav */
+                height: 100vh;
+                display: none;
+                flex-direction: column;
+            }
+            #page2.active {
+                display: flex;
+            }
+            #page2 * { box-sizing: border-box; }
+            .p2-header {
+                height: var(--nav-height);
+                background: #fff;
+                border-bottom: 1px solid #DCDEE5;
+                display: flex;
+                align-items: center;
+                padding: 0 16px;
+                flex-shrink: 0;
+            }
+            .p2-repo-selector {
+                font-size: 14px;
+                color: #313238;
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                cursor: pointer;
+            }
+            .p2-header-divider {
+                width: 1px;
+                height: 16px;
+                background: #DCDEE5;
+                margin: 0 16px;
+            }
+            .p2-top-nav {
+                display: flex;
+                height: 100%;
+                align-items: center;
+            }
+            .p2-top-nav-item {
+                height: 100%;
+                display: flex;
+                align-items: center;
+                padding: 0 16px;
+                font-size: 14px;
+                color: #63656E;
+                cursor: pointer;
+                border-bottom: 2px solid transparent;
+            }
+            .p2-top-nav-item:hover { color: #313238; }
+            .p2-top-nav-item.active {
+                color: var(--color-primary);
+                border-bottom-color: var(--color-primary);
+            }
+            .p2-breadcrumb {
+                margin-left: auto;
+                font-size: 12px;
+                color: #979BA5;
+            }
+
+            .p2-body {
+                display: flex;
+                flex: 1;
+                overflow: hidden;
+            }
+            /* Left Level 1 Nav */
+            .p2-sidebar-1 {
+                width: var(--sidebar-layout-b-width);
+                background: #F5F7FA;
+                border-right: 1px solid #DCDEE5;
+                flex-shrink: 0;
+                padding: 8px 0;
+                overflow-y: auto;
+            }
+            .p2-nav1-item {
+                height: 36px;
+                padding: 0 12px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 12px;
+                color: #63656E;
+                cursor: pointer;
+                border-left: 3px solid transparent;
+            }
+            .p2-nav1-item:hover { background: #EAEBF0; }
+            .p2-nav1-item.active {
+                background: #E1ECFF;
+                color: var(--color-primary);
+                border-left-color: var(--color-primary);
+            }
+            .p2-nav1-icon {
+                width: 16px; height: 16px;
+                background: #C4C6CC;
+                border-radius: 2px;
+                display: inline-block;
+            }
+            .p2-nav1-item.active .p2-nav1-icon { background: var(--color-primary); }
+
+            /* Left Level 2 Nav */
+            .p2-sidebar-2 {
+                width: 160px;
+                background: #fff;
+                border-right: 1px solid #DCDEE5;
+                flex-shrink: 0;
+                padding-top: 12px;
+                overflow-y: auto;
+            }
+            .p2-nav2-item {
+                height: var(--btn-h);
+                padding: 0 16px;
+                display: flex;
+                align-items: center;
+                font-size: 12px;
+                color: #63656E;
+                cursor: pointer;
+            }
+            .p2-nav2-item:hover { background: #F5F7FA; }
+            .p2-nav2-item.active {
+                background: #F0F1F5;
+                color: #313238;
+                font-weight: 500;
+            }
+
+            /* Main Content */
+            .p2-content {
+                flex: 1;
+                background: #fff;
+                padding: 24px;
+                overflow-y: auto;
+            }
+            .p2-title {
+                font-size: 16px;
+                color: #313238;
+                font-weight: 600;
+                margin-bottom: 20px;
+            }
+
+            /* Content forms */
+            .p2-checkbox-label {
+                display: flex;
+                align-items: center;
+                font-size: 14px;
+                color: #313238;
+                cursor: pointer;
+                user-select: none;
+            }
+            .p2-checkbox-label input[type="checkbox"] {
+                width: 16px;
+                height: 16px;
+                margin: 0;
+                margin-right: 8px;
+                cursor: pointer;
+                border: 1px solid #C4C6CC;
+                border-radius: 2px;
+            }
+            .p2-checkbox-desc {
+                font-size: 12px;
+                color: #979BA5;
+                margin-left: 4px;
+            }
+            .p2-expand-area {
+                margin-top: 12px;
+                margin-left: 24px;
+                display: none;
+            }
+            .p2-expand-area.active {
+                display: block;
+            }
+            .p2-form-label {
+                font-size: 12px;
+                color: #63656E;
+                margin-bottom: 6px;
+                display: block;
+            }
+            .p2-form-label .required {
+                color: var(--color-danger);
+            }
+            .p2-input-wrap {
+                position: relative;
+                width: 100%;
+                max-width: 500px;
+            }
+            .p2-input {
+                width: 100%;
+                height: var(--btn-h);
+                border: 1px solid #C4C6CC;
+                border-radius: 4px;
+                padding: 0 32px 0 12px;
+                font-size: 12px;
+                outline: none;
+                transition: border-color 0.2s, box-shadow 0.2s;
+            }
+            .p2-input:focus {
+                border-color: var(--color-primary);
+                box-shadow: 0 0 0 3px rgba(58,132,255,0.2);
+            }
+            .p2-input.success {
+                border-color: #2DCB56;
+            }
+            .p2-input.error {
+                border-color: var(--color-danger);
+            }
+            .p2-input-icon {
+                position: absolute;
+                right: 8px;
+                top: 8px;
+                width: 16px;
+                height: 16px;
+                display: none;
+                align-items: center;
+                justify-content: center;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            .p2-input.success + .p2-input-icon {
+                display: flex;
+                color: #2DCB56;
+            }
+            .p2-input.error + .p2-input-icon {
+                display: flex;
+                color: var(--color-danger);
+            }
+            .p2-error-text {
+                font-size: 12px;
+                color: var(--color-danger);
+                margin-top: 4px;
+                display: none;
+            }
+
+            .p2-verify-row {
+                display: flex;
+                align-items: center;
+                margin-top: 16px;
+                max-width: 500px;
+            }
+            .p2-verify-input-wrap {
+                flex: 1;
+                position: relative;
+            }
+            .p2-verify-input {
+                width: 100%;
+                height: var(--btn-h);
+                border: 1px solid #C4C6CC;
+                border-radius: 4px;
+                padding: 0 32px 0 12px;
+                font-size: 12px;
+                outline: none;
+            }
+            .p2-verify-input.success { border-color: #2DCB56; }
+            .p2-verify-input.error { border-color: var(--color-danger); }
+            .p2-verify-input.success + .p2-input-icon { display: flex; color: #2DCB56; }
+            .p2-verify-input.error + .p2-input-icon { display: flex; color: var(--color-danger); }
+            
+            .p2-verify-btn {
+                height: var(--btn-h);
+                padding: 0 15px;
+                border-radius: 4px;
+                margin-left: 8px;
+                font-size: 12px;
+                cursor: pointer;
+                outline: none;
+                transition: all 0.2s;
+            }
+            .p2-verify-btn:disabled {
+                background: #fff;
+                border: 1px solid #DCDEE5;
+                color: #C4C6CC;
+                cursor: not-allowed;
+            }
+            .p2-verify-btn:not(:disabled) {
+                background: #fff;
+                border: 1px solid var(--color-primary);
+                color: var(--color-primary);
+            }
+
+            .p2-radio-label {
+                display: flex;
+                align-items: center;
+                font-size: 12px;
+                color: #313238;
+                margin-bottom: 12px;
+                cursor: pointer;
+            }
+            .p2-radio-label input[type="radio"] {
+                margin: 0;
+                margin-right: 8px;
+                cursor: pointer;
+            }
+            .p2-radio-label.disabled {
+                color: #C4C6CC;
+                cursor: not-allowed;
+            }
+            .p2-radio-label.disabled input[type="radio"] {
+                cursor: not-allowed;
+            }
+
+            .p2-info-banner {
+                background: #EBF4FF;
+                border: 1px solid #A3C5F8;
+                border-radius: 4px;
+                padding: 8px 12px;
+                font-size: 12px;
+                color: #313238;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                margin-bottom: 16px;
+            }
+
+            .p2-save-btn {
+                height: var(--btn-h);
+                padding: 0 16px;
+                border-radius: 4px;
+                margin-top: 24px;
+                font-size: 14px;
+                outline: none;
+                border: none;
+                cursor: pointer;
+            }
+            .p2-save-btn:disabled {
+                background: #EAEBF0;
+                color: #C4C6CC;
+                cursor: not-allowed;
+            }
+            .p2-save-btn:not(:disabled) {
+                background: var(--color-primary);
+                color: #fff;
+            }
+
+            .p2-demo-bar {
+                background: #FFFCE6;
+                border: 1px solid #FFE163;
+                border-radius: 4px;
+                padding: 8px 12px;
+                margin-bottom: 16px;
+                font-size: 12px;
+                color: #313238;
+                display: flex;
+                align-items: center;
+            }
+            .p2-demo-btn {
+                background: #fff;
+                border: 1px solid #DCDEE5;
+                border-radius: 2px;
+                padding: 2px 8px;
+                cursor: pointer;
+                font-size: 12px;
+                margin-left: 8px;
+            }
+            .p2-demo-btn:hover { background: #F5F7FA; }
+        </style>
+
+        <div class="p2-header">
+            <div class="p2-repo-selector">
+                BK1/khh1-... <span style="font-size: 10px;">&#9662;</span>
+            </div>
+            <div class="p2-header-divider"></div>
+            <div class="p2-top-nav">
+                <div class="p2-top-nav-item">代码</div>
+                <div class="p2-top-nav-item">提交</div>
+                <div class="p2-top-nav-item">分支</div>
+                <div class="p2-top-nav-item">合并请求</div>
+                <div class="p2-top-nav-item">成员</div>
+                <div class="p2-top-nav-item active">设置</div>
+                <div class="p2-top-nav-item">仓库总览</div>
+            </div>
+            <div class="p2-breadcrumb">代码库 / 设置</div>
+        </div>
+
+        <div class="p2-body">
+            <div class="p2-sidebar-1">
+                <div class="p2-nav1-item"><span class="p2-nav1-icon"></span>代码</div>
+                <div class="p2-nav1-item"><span class="p2-nav1-icon"></span>提交</div>
+                <div class="p2-nav1-item"><span class="p2-nav1-icon"></span>分支</div>
+                <div class="p2-nav1-item"><span class="p2-nav1-icon"></span>合并请求</div>
+                <div class="p2-nav1-item"><span class="p2-nav1-icon"></span>成员</div>
+                <div class="p2-nav1-item active"><span class="p2-nav1-icon"></span>设置</div>
+                <div class="p2-nav1-item"><span class="p2-nav1-icon"></span>仓库总览</div>
+            </div>
+
+            <div class="p2-sidebar-2">
+                <div class="p2-nav2-item">基本设置</div>
+                <div class="p2-nav2-item active">推送设置</div>
+                <div class="p2-nav2-item">分支设置</div>
+                <div class="p2-nav2-item">标签设置</div>
+                <div class="p2-nav2-item">议题模版</div>
+                <div class="p2-nav2-item">Webhook</div>
+                <div class="p2-nav2-item">跟踪设置</div>
+                <div class="p2-nav2-item">IP白名单</div>
+            </div>
+
+            <div class="p2-content">
+                <div class="p2-demo-bar">
+                    <span>[原型演示辅助] 切换系统级 GPG 强制开启状态：</span>
+                    <button class="p2-demo-btn" id="p2-demo-global-gpg" onclick="p2ToggleGlobalGPG()">点击切换（当前：未强制）</button>
+                </div>
+
+                <div class="p2-title">推送设置</div>
+
+                <!-- Config 1 -->
+                <div style="margin-bottom: 20px;">
+                    <label class="p2-checkbox-label">
+                        <input type="checkbox" onchange="p2FormChanged()">
+                        禁止强制推送
+                        <span class="p2-checkbox-desc">（禁止使用 git push -f 命令提交代码）</span>
+                    </label>
+                </div>
+
+                <!-- Config 2 -->
+                <div style="margin-bottom: 20px;">
+                    <label class="p2-checkbox-label">
+                        <input type="checkbox" id="p2-chk-msg-format" onchange="p2ToggleMsgFormat(); p2FormChanged()">
+                        提交信息格式校验
+                        <span class="p2-checkbox-desc">（启用正则表达式校验）</span>
+                    </label>
+                    <div class="p2-expand-area" id="p2-area-msg-format">
+                        <label class="p2-form-label">正则表达式 <span class="required">*</span></label>
+                        <div class="p2-input-wrap">
+                            <input type="text" class="p2-input" id="p2-input-regex" oninput="p2CheckRegex(); p2FormChanged()">
+                            <div class="p2-input-icon" id="p2-regex-icon"></div>
+                        </div>
+                        <div class="p2-error-text" id="p2-regex-error">正则表达式格式有误，请进行修改。</div>
+
+                        <div class="p2-verify-row">
+                            <div style="width: 100%;">
+                                <label class="p2-form-label">验证</label>
+                                <div style="display: flex;">
+                                    <div class="p2-verify-input-wrap">
+                                        <input type="text" class="p2-verify-input" id="p2-input-verify" placeholder="请输入需验证的文本" oninput="p2ClearVerifyState()">
+                                        <div class="p2-input-icon" id="p2-verify-icon"></div>
+                                    </div>
+                                    <button class="p2-verify-btn" id="p2-btn-verify" disabled onclick="p2RunVerify()">验证</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <hr style="border:none; border-top:1px solid #DCDEE5; margin: 20px 0;">
+
+                <!-- Config 3: GPG -->
+                <div>
+                    <div class="p2-info-banner" id="p2-gpg-global-banner" style="display: none;">
+                        <span style="color: var(--color-primary); font-size: 14px;">&#8505;</span> 当前平台已全局开启 GPG 签名校验，仓库配置已被覆盖
+                    </div>
+                    <label class="p2-checkbox-label" id="p2-lbl-gpg-main">
+                        <input type="checkbox" id="p2-chk-gpg" onchange="p2ToggleGPG(); p2FormChanged()">
+                        GPG 签名校验
+                        <span class="p2-checkbox-desc">（开启后，当前仓库将验证推送的 Commit 签名，确保代码来源可信。）</span>
+                    </label>
+                    <div class="p2-expand-area" id="p2-area-gpg">
+                        <label class="p2-form-label" style="margin-bottom: 12px;">执行模式</label>
+                        <label class="p2-radio-label p2-gpg-radio-lbl">
+                            <input type="radio" name="p2_gpg_mode" value="audit" checked onchange="p2FormChanged()">
+                            仅标注（不阻断推送，在提交详情页显示验证状态）
+                        </label>
+                        <label class="p2-radio-label p2-gpg-radio-lbl">
+                            <input type="radio" name="p2_gpg_mode" value="strict" onchange="p2FormChanged()">
+                            推送拦截（未通过 GPG 校验的提交将被拒绝推送）
+                        </label>
+                    </div>
+                </div>
+
+                <button class="p2-save-btn" id="p2-btn-save" disabled onclick="p2Save()">保存</button>
+
+            </div>
+        </div>
+
+        <script>
+            let p2ValidRegex = null;
+
+            function p2FormChanged() {
+                document.getElementById('p2-btn-save').disabled = false;
+            }
+
+            function p2ToggleMsgFormat() {
+                const chk = document.getElementById('p2-chk-msg-format');
+                const area = document.getElementById('p2-area-msg-format');
+                if (chk.checked) {
+                    area.classList.add('active');
+                } else {
+                    area.classList.remove('active');
+                }
+            }
+
+            function p2CheckRegex() {
+                const input = document.getElementById('p2-input-regex');
+                const icon = document.getElementById('p2-regex-icon');
+                const error = document.getElementById('p2-regex-error');
+                const verifyBtn = document.getElementById('p2-btn-verify');
+                const val = input.value;
+
+                input.classList.remove('success', 'error');
+                error.style.display = 'none';
+                p2ValidRegex = null;
+
+                if (!val) {
+                    verifyBtn.disabled = true;
+                    p2ClearVerifyState();
+                    return;
+                }
+
+                try {
+                    p2ValidRegex = new RegExp(val);
+                    input.classList.add('success');
+                    icon.innerHTML = '&#10003;'; // Checkmark
+                    verifyBtn.disabled = false;
+                } catch (e) {
+                    input.classList.add('error');
+                    icon.innerHTML = '&#10005;'; // Cross
+                    error.style.display = 'block';
+                    verifyBtn.disabled = true;
+                }
+                p2ClearVerifyState();
+            }
+
+            function p2ClearVerifyState() {
+                const input = document.getElementById('p2-input-verify');
+                const icon = document.getElementById('p2-verify-icon');
+                input.classList.remove('success', 'error');
+                icon.innerHTML = '';
+            }
+
+            function p2RunVerify() {
+                if (!p2ValidRegex) return;
+                const input = document.getElementById('p2-input-verify');
+                const icon = document.getElementById('p2-verify-icon');
+                const val = input.value;
+
+                input.classList.remove('success', 'error');
+
+                if (p2ValidRegex.test(val)) {
+                    input.classList.add('success');
+                    icon.innerHTML = '&#10003;';
+                } else {
+                    input.classList.add('error');
+                    icon.innerHTML = '&#10005;';
+                }
+            }
+
+            function p2ToggleGPG() {
+                if (isGlobalForced) return;
+                const chk = document.getElementById('p2-chk-gpg');
+                const area = document.getElementById('p2-area-gpg');
+                if (chk.checked) {
+                    area.classList.add('active');
+                } else {
+                    area.classList.remove('active');
+                }
+            }
+
+            function p2ApplyGlobalGPGState(nextState) {
+                isGlobalForced = nextState;
+                const btn = document.getElementById('p2-demo-global-gpg');
+                const banner = document.getElementById('p2-gpg-global-banner');
+                const chk = document.getElementById('p2-chk-gpg');
+                const area = document.getElementById('p2-area-gpg');
+                const radios = document.querySelectorAll('.p2-gpg-radio-lbl input[type="radio"]');
+                const radioLabels = document.querySelectorAll('.p2-gpg-radio-lbl');
+
+                if (btn) {
+                    btn.innerText = isGlobalForced ? '点击切换（当前：强制开启）' : '点击切换（当前：未强制）';
+                }
+
+                if (isGlobalForced) {
+                    banner.style.display = 'flex';
+                    chk.checked = true;
+                    chk.disabled = true;
+                    chk.style.pointerEvents = 'none';
+                    chk.style.backgroundColor = '#EAEBF0';
+                    document.getElementById('p2-lbl-gpg-main').style.cursor = 'not-allowed';
+                    area.classList.add('active');
+
+                    radios.forEach(r => {
+                        r.disabled = false;
+                    });
+                    radioLabels.forEach(l => l.classList.remove('disabled'));
+                } else {
+                    banner.style.display = 'none';
+                    chk.disabled = false;
+                    chk.style.pointerEvents = 'auto';
+                    chk.style.backgroundColor = '';
+                    document.getElementById('p2-lbl-gpg-main').style.cursor = 'pointer';
+                    
+                    radios.forEach(r => {
+                        r.disabled = false;
+                    });
+                    radioLabels.forEach(l => l.classList.remove('disabled'));
+                    
+                    p2ToggleGPG(); // Sync area visibility
+                }
+            }
+
+            function p2ToggleGlobalGPG() {
+                p2ApplyGlobalGPGState(!isGlobalForced);
+            }
+
+            function p2Save() {
+                document.getElementById('p2-btn-save').disabled = true;
+                if (typeof saveMock === 'function') {
+                    saveMock('保存成功');
+                } else {
+                    const toast = document.createElement('div');
+                    toast.style.cssText = 'position: fixed; top: 120px; left: 50%; transform: translateX(-50%); background: var(--color-success); color: white; padding: 10px 20px; border-radius: 4px; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.1);';
+                    toast.innerText = '保存成功';
+                    document.body.appendChild(toast);
+                    setTimeout(() => toast.remove(), 2000);
+                }
+            }
+        </script>
+    </div>
+
+    <!-- ================= PAGE 3 ================= -->
+    <div id="page3" class="page">
+        <style>
+            #page3 {
+                background: #fff;
+                padding-top: 50px;
+                height: 100vh;
+                display: none;
+                flex-direction: column;
+            }
+            #page3.active { display: flex; }
+            #page3 * { box-sizing: border-box; }
+            
+            .p3-body {
+                display: flex;
+                flex: 1;
+                overflow: hidden;
+            }
+            .p3-sidebar {
+                width: var(--sidebar-layout-b-width);
+                background: #fff;
+                border-right: 1px solid #DCDEE5;
+                flex-shrink: 0;
+                padding: 0;
+                overflow-y: auto;
+            }
+            .p3-nav-group {
+                height: 52px;
+                padding: 0 16px;
+                font-size: 16px;
+                color: #fff;
+                background: #081E40;
+                display: flex;
+                align-items: center;
+                font-weight: 600;
+            }
+            .p3-nav-item {
+                height: 36px;
+                padding: 0 16px;
+                display: flex;
+                align-items: center;
+                font-size: 14px;
+                color: #63656E;
+                cursor: pointer;
+                border-left: 3px solid transparent;
+            }
+            .p3-nav-item:hover { background: #EAEBF0; }
+            .p3-nav-item.active {
+                background: #E1ECFF;
+                color: var(--color-primary);
+                border-left-color: var(--color-primary);
+                font-weight: 500;
+            }
+
+            .p3-content {
+                flex: 1;
+                background: #fff;
+                padding: 24px;
+                overflow-y: auto;
+            }
+            .p3-title {
+                font-size: 16px;
+                color: #313238;
+                font-weight: 600;
+                margin-bottom: 20px;
+            }
+            .p3-card {
+                border: 1px solid #DCDEE5;
+                border-radius: 4px;
+                background: #fff;
+                margin-bottom: 20px;
+                box-shadow: none;
+            }
+            .p3-card-header {
+                padding: 16px 20px;
+                border-bottom: 1px solid #DCDEE5;
+                font-size: 14px;
+                font-weight: 600;
+                color: #313238;
+                background: #FAFCFF;
+            }
+            .p3-card-body {
+                padding: 20px;
+            }
+
+            .p3-switch-row {
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+            }
+            .p3-switch-info h4 {
+                font-size: 14px;
+                color: #313238;
+                margin-bottom: 4px;
+            }
+            .p3-switch-info p {
+                font-size: 12px;
+                color: #979BA5;
+            }
+
+            /* Custom Switch */
+            .p3-switch {
+                position: relative;
+                display: inline-block;
+                width: 44px;
+                height: 22px;
+            }
+            .p3-switch input { opacity: 0; width: 0; height: 0; }
+            .p3-slider {
+                position: absolute;
+                cursor: pointer;
+                top: 0; left: 0; right: 0; bottom: 0;
+                background-color: #C4C6CC;
+                transition: .3s;
+                border-radius: 22px;
+            }
+            .p3-slider:before {
+                position: absolute;
+                content: "";
+                height: 18px; width: 18px;
+                left: 2px; bottom: 2px;
+                background-color: white;
+                transition: .3s;
+                border-radius: 50%;
+            }
+            .p3-switch input:checked + .p3-slider { background-color: var(--color-success); }
+            .p3-switch input:checked + .p3-slider:before { transform: translateX(22px); }
+
+            .p3-expand-area {
+                margin-top: 16px;
+                padding: 16px;
+                background: #F5F9FF;
+                border: 1px solid #E1ECFF;
+                border-radius: 4px;
+                display: none;
+            }
+            .p3-expand-area.active { display: block; }
+            .p3-form-label {
+                font-size: 12px;
+                color: #63656E;
+                margin-bottom: 8px;
+                display: block;
+                font-weight: 500;
+            }
+            .p3-radio-label {
+                display: flex;
+                align-items: center;
+                font-size: 12px;
+                color: #313238;
+                margin-bottom: 12px;
+                cursor: pointer;
+            }
+            .p3-radio-label input { margin: 0; margin-right: 8px; cursor: pointer; }
+
+            .p3-table-toolbar {
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 16px;
+            }
+            .p3-table {
+                width: 100%;
+                border-collapse: collapse;
+                border: 1px solid #DCDEE5;
+            }
+            .p3-table th, .p3-table td {
+                padding: 10px 16px;
+                text-align: left;
+                border-bottom: 1px solid #DCDEE5;
+                font-size: 12px;
+            }
+            .p3-table th {
+                background: #FAFCFF;
+                color: #63656E;
+                font-weight: 500;
+            }
+            .p3-table td { color: #313238; }
+            .p3-empty {
+                padding: 40px;
+                text-align: center;
+                color: #979BA5;
+                font-size: 12px;
+                border-bottom: 1px solid #DCDEE5;
+            }
+            .p3-btn-blue {
+                height: var(--btn-h);
+                padding: 0 16px;
+                background: var(--color-primary);
+                color: #fff;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 12px;
+            }
+            .p3-btn-blue:hover { background: #0056CC; }
+            .p3-btn-text {
+                color: var(--color-primary);
+                background: none;
+                border: none;
+                cursor: pointer;
+                font-size: 12px;
+                padding: 0;
+            }
+            .p3-btn-text:hover { color: #0056CC; }
+
+            .p3-save-btn {
+                height: var(--btn-h);
+                padding: 0 16px;
+                background: var(--color-primary);
+                color: #fff;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 14px;
+                margin-top: 8px;
+            }
+            .p3-save-btn:disabled {
+                background: #EAEBF0;
+                color: #C4C6CC;
+                cursor: not-allowed;
+            }
+        </style>
+
+        <div class="p3-body">
+            <div class="p3-sidebar">
+                <div class="p3-nav-group">系统设置</div>
+                <div class="p3-nav-item">基础配置</div>
+                <div class="p3-nav-item">认证接入</div>
+                <div class="p3-nav-item">安全设置</div>
+                <div class="p3-nav-item active">GPG 签名配置</div>
+                <div class="p3-nav-item">审计日志</div>
+            </div>
+            
+            <div class="p3-content">
+                <div class="p3-title">GPG 签名校验配置</div>
+
+                <div class="p3-card">
+                    <div class="p3-card-header">全局强制开关</div>
+                    <div class="p3-card-body">
+                        <div class="p3-switch-row">
+                            <div class="p3-switch-info">
+                                <h4>强制开启全局 GPG 签名校验</h4>
+                                <p>开启后，所有代码库将强制启用 GPG 校验，且仓库管理员无法在仓库设置中关闭该功能。</p>
+                            </div>
+                            <label class="p3-switch">
+                                <input type="checkbox" id="p3-sys-toggle" onclick="p3HandleToggle(event)">
+                                <span class="p3-slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="p3-expand-area" id="p3-sys-mode-area">
+                            <label class="p3-form-label">默认执行模式：</label>
+                            <p style="font-size: 12px; color: #979BA5; margin-bottom: 12px;">全局开启时的初始规则。仓库管理员可自行调整为审计模式或强管控模式，但不可关闭。</p>
+                            <label class="p3-radio-label">
+                                <input type="radio" name="p3_sys_mode" value="audit" checked onchange="p3EnableSave()">
+                                仅标注（不阻断推送，在提交详情页显示验证状态）
+                            </label>
+                            <label class="p3-radio-label">
+                                <input type="radio" name="p3_sys_mode" value="strict" onchange="p3EnableSave()">
+                                推送拦截（强管控模式：拒绝未通过 GPG 校验的提交）
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="p3-card">
+                    <div class="p3-card-header">生效说明</div>
+                    <div class="p3-card-body">
+                        <div style="padding: 12px 16px; border: 1px solid #E1ECFF; background: #F5F9FF; border-radius: 4px;">
+                            <div style="font-size: 14px; color: #313238; font-weight: 600; margin-bottom: 8px;">全局开启后的行为</div>
+                            <div style="font-size: 12px; color: #63656E; line-height: 22px;">
+                                1. 所有仓库默认启用 GPG 签名校验，仓库管理员不可关闭该能力。<br>
+                                2. 仓库仍可查看并调整“执行模式”，用于选择仅标注还是阻断推送。<br>
+                                3. 提交列表与提交详情页会显示签名校验结果，并支持悬浮/点击查看原因。
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <button class="p3-save-btn" id="p3-btn-save" disabled onclick="p3Save()">保存配置</button>
+            </div>
+        </div>
+
+        <script>
+            let p3PendingToggle = false;
+            function p3HandleToggle(e) {
+                e.preventDefault();
+                const toggle = document.getElementById('p3-sys-toggle');
+                // onclick fires AFTER checked is set to new value; e.preventDefault() reverts it after handler.
+                // So toggle.checked here is the INTENDED new state.
+                if (toggle.checked) {
+                    // User is trying to turn ON → show confirm modal first
+                    p3PendingToggle = true;
+                    openModal('modal-sys-confirm');
+                } else {
+                    // User is turning OFF → apply immediately
+                    toggle.checked = false;
+                    document.getElementById('p3-sys-mode-area').classList.remove('active');
+                    isGlobalForced = false;
+                    p2ApplyGlobalGPGState(false);
+                    p3EnableSave();
+                }
+            }
+
+            function p3ConfirmToggle() {
+                if (!p3PendingToggle) return;
+                p3PendingToggle = false;
+                const toggle = document.getElementById('p3-sys-toggle');
+                closeModal('modal-sys-confirm');
+                toggle.checked = true;
+                document.getElementById('p3-sys-mode-area').classList.add('active');
+                isGlobalForced = true;
+                p2ApplyGlobalGPGState(true);
+                p3EnableSave();
+            }
+
+            function p3EnableSave() {
+                const btn = document.getElementById('p3-btn-save');
+                if(btn) btn.disabled = false;
+            }
+
+            function p3Save() {
+                const btn = document.getElementById('p3-btn-save');
+                if(btn) btn.disabled = true;
+                
+                const toggle = document.getElementById('p3-sys-toggle');
+                if(toggle && toggle.checked) {
+                    isGlobalForced = true;
+                    p2ApplyGlobalGPGState(true);
+                } else {
+                    isGlobalForced = false;
+                    p2ApplyGlobalGPGState(false);
+                }
+
+                const toast = document.createElement('div');
+                toast.style.cssText = 'position: fixed; top: 120px; left: 50%; transform: translateX(-50%); background: var(--color-success); color: white; padding: 10px 20px; border-radius: 4px; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.1); font-size: 14px;';
+                toast.innerText = '系统配置已保存生效';
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 2000);
+            }
+        </script>
+    </div>
+
+    <!-- ================= PAGE 4 ================= -->
+    <div id="page4" class="page">
+        <style>
+            #page4 {
+                background: #fff;
+                padding-top: 50px;
+                height: 100vh;
+                display: none;
+                flex-direction: column;
+            }
+            #page4.active { display: flex; }
+            #page4 * { box-sizing: border-box; }
+            
+            .p4-header {
+                height: var(--nav-height);
+                background: #fff;
+                border-bottom: 1px solid #DCDEE5;
+                display: flex;
+                align-items: center;
+                padding: 0 16px;
+                flex-shrink: 0;
+            }
+            .p4-repo-selector {
+                font-size: 14px;
+                color: #313238;
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                cursor: pointer;
+            }
+            .p4-header-divider {
+                width: 1px;
+                height: 16px;
+                background: #DCDEE5;
+                margin: 0 16px;
+            }
+            .p4-top-nav {
+                display: flex;
+                height: 100%;
+                align-items: center;
+            }
+            .p4-top-nav-item {
+                height: 100%;
+                display: flex;
+                align-items: center;
+                padding: 0 16px;
+                font-size: 14px;
+                color: #63656E;
+                cursor: pointer;
+                border-bottom: 2px solid transparent;
+            }
+            .p4-top-nav-item.active {
+                color: var(--color-primary);
+                border-bottom-color: var(--color-primary);
+            }
+            .p4-breadcrumb {
+                margin-left: auto;
+                font-size: 12px;
+                color: #979BA5;
+            }
+
+            .p4-body {
+                display: flex;
+                flex: 1;
+                overflow: hidden;
+            }
+            .p4-sidebar {
+                width: var(--sidebar-layout-b-width);
+                background: #F5F7FA;
+                border-right: 1px solid #DCDEE5;
+                flex-shrink: 0;
+                padding: 8px 0;
+                overflow-y: auto;
+            }
+            .p4-nav-item {
+                height: 36px;
+                padding: 0 12px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 12px;
+                color: #63656E;
+                cursor: pointer;
+                border-left: 3px solid transparent;
+            }
+            .p4-nav-item:hover { background: #EAEBF0; }
+            .p4-nav-item.active {
+                background: #E1ECFF;
+                color: var(--color-primary);
+                border-left-color: var(--color-primary);
+            }
+            .p4-nav-icon {
+                width: 16px; height: 16px;
+                background: #C4C6CC;
+                border-radius: 2px;
+                display: inline-block;
+            }
+            .p4-nav-item.active .p4-nav-icon { background: var(--color-primary); }
+
+            .p4-content {
+                flex: 1;
+                background: #F5F7FA;
+                padding: 18px 26px 24px;
+                overflow-y: auto;
+            }
+            .p4-toolbar {
+                display: flex;
+                justify-content: space-between;
+                gap: 16px;
+                margin-bottom: 18px;
+                align-items: center;
+            }
+            .p4-toolbar-right { display: flex; align-items: center; gap: 12px; }
+            .p4-branch-selector {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 0 12px;
+                height: var(--btn-h);
+                border: 1px solid #C4C6CC;
+                border-radius: 4px;
+                font-size: 12px;
+                cursor: pointer;
+                background: #fff;
+            }
+            .p4-branch-selector:hover { border-color: var(--color-primary); }
+            .p4-search-box {
+                display: flex;
+                align-items: center;
+                width: 240px;
+                height: var(--btn-h);
+                border: 1px solid #C4C6CC;
+                border-radius: 4px;
+                padding: 0 12px;
+                font-size: 12px;
+            }
+            .p4-search-box input {
+                border: none;
+                outline: none;
+                flex: 1;
+                width: 100%;
+                font-size: 12px;
+            }
+
+            .p4-date-box { display: flex; align-items: center; width: 260px; height: var(--btn-h); border: 1px solid #C4C6CC; border-radius: 4px; padding: 0 12px; font-size: 12px; color: #979BA5; background: #fff; }
+            .p4-list { display: flex; flex-direction: column; gap: 18px; }
+            .p4-commit-card { background: #fff; border-radius: 8px; padding: 24px 28px; border: 1px solid #EDF1F5; }
+            .p4-commit-row { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+            .p4-commit-main { min-width: 0; flex: 1; }
+            .p4-commit-msg {
+                font-size: 18px;
+                font-weight: 600;
+                color: #132B50;
+                cursor: pointer;
+                line-height: 26px;
+            }
+            .p4-commit-msg:hover { color: var(--color-primary); text-decoration: underline; }
+            .p4-commit-meta { display: flex; align-items: center; gap: 10px; margin-top: 18px; font-size: 12px; color: #63656E; flex-wrap: wrap; }
+            .p4-avatar { width: 32px; height: 32px; border-radius: 50%; margin-right: 0; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 600; }
+            .p4-author-name { font-size: 16px; color: #132B50; font-weight: 600; }
+            .p4-time-pill { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 12px; background: #fff; color: #7E8A9A; border: 1px solid #DDE6F0; }
+            .p4-status-chip { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 12px; font-size: 12px; gap: 4px; }
+            .p4-status-chip.verified { background: #E7F6ED; color: var(--color-success); border: 1px solid #B6E7C7; }
+            .p4-status-chip.platform { background: #E1ECFF; color: var(--color-primary); border: 1px solid #B8D0FF; }
+            .p4-status-chip.unverified { background: #FFF4E2; color: #B77914; border: 1px solid #FFD48D; }
+            .p4-status-chip.unsigned { background: #F5F7FA; color: #7A8798; border: 1px solid #D9E2EC; }
+            .p4-right-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+            .p4-hash-btn, .p4-icon-btn, .p4-more-btn { height: 42px; border: 1px solid #D9E2EC; background: #fff; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; color: #1C3D66; cursor: pointer; }
+            .p4-hash-btn { min-width: 132px; padding: 0 14px; justify-content: space-between; gap: 12px; }
+            .p4-hash { color: #1C3D66; cursor: pointer; font-family: monospace; font-size: 13px; }
+            .p4-hash:hover { text-decoration: underline; }
+            .p4-icon-btn, .p4-more-btn { width: 42px; font-size: 16px; }
+            .p4-icon-btn:hover, .p4-more-btn:hover, .p4-hash-btn:hover { border-color: #A9C5F8; background: #F7FAFF; }
+        </style>
+
+        <div class="p4-header">
+            <div class="p4-repo-selector">
+                BK1/khh1-... <span style="font-size: 10px;">&#9662;</span>
+            </div>
+            <div class="p4-header-divider"></div>
+            <div class="p4-top-nav">
+                <div class="p4-top-nav-item">代码</div>
+                <div class="p4-top-nav-item active">提交</div>
+                <div class="p4-top-nav-item">分支</div>
+                <div class="p4-top-nav-item">合并请求</div>
+                <div class="p4-top-nav-item">成员</div>
+                <div class="p4-top-nav-item">设置</div>
+                <div class="p4-top-nav-item">仓库总览</div>
+            </div>
+            <div class="p4-breadcrumb">代码库 / 提交</div>
+        </div>
+
+        <div class="p4-body">
+            <div class="p4-sidebar">
+                <div class="p4-nav-item"><span class="p4-nav-icon"></span>代码浏览</div>
+                <div class="p4-nav-item active"><span class="p4-nav-icon"></span>提交记录</div>
+                <div class="p4-nav-item"><span class="p4-nav-icon"></span>分支</div>
+                <div class="p4-nav-item"><span class="p4-nav-icon"></span>标签</div>
+            </div>
+
+            <div class="p4-content">
+                <div class="p4-toolbar">
+                    <div class="p4-branch-selector"><span style="font-weight:bold;color:#313238;">master</span> <span style="font-size:10px;">&#9662;</span></div>
+                    <div class="p4-toolbar-right">
+                        <div class="p4-search-box"><span style="color:#C4C6CC;margin-right:8px;">&#128100;</span><input type="text" placeholder="请输入提交人"></div>
+                        <div class="p4-date-box">&#128197;　请选择提交的起始日期</div>
+                        <div class="p4-search-box"><span style="color:#C4C6CC;margin-right:8px;">&#128269;</span><input type="text" placeholder="请输入关键字，按下Enter搜索"></div>
+                    </div>
+                </div>
+
+                <div class="p4-list">
+                    <div class="p4-commit-card"><div class="p4-commit-row"><div class="p4-commit-main"><span class="p4-commit-msg" onclick="openCommitDetail('verified')">docs: unify background keywords across all template documents</span><div class="p4-commit-meta"><div class="p4-avatar" style="background:#A0A05E;">T</div><span class="p4-author-name">Tony Chen</span><span class="p4-time-pill">提交于 6 天前</span><span class="p4-status-chip verified tooltip-container" onmouseenter="showTooltip(event, '签名状态：已验证<br>签名类型：本地签名<br>签名者邮箱：tony@example.com<br>公钥 Key ID：3AA5C34371567BD2<br>签名算法：Ed25519')" onmouseleave="hideTooltip()">已验证</span></div></div><div class="p4-right-actions"><button class="p4-hash-btn" onclick="openCommitDetail('verified')"><span style="color:#8FA6C2;">⇢</span><span class="p4-hash">11884d78</span></button><button class="p4-icon-btn">&#128203;</button><button class="p4-icon-btn">&#8249;/&#8250;</button><button class="p4-more-btn">&#8230;</button></div></div></div>
+                    <div class="p4-commit-card"><div class="p4-commit-row"><div class="p4-commit-main"><span class="p4-commit-msg" onclick="openCommitDetail('platform')">chore: add untracked files to .gitignore</span><div class="p4-commit-meta"><div class="p4-avatar" style="background:#A0A05E;">T</div><span class="p4-author-name">Tony Chen</span><span class="p4-time-pill">提交于 6 天前</span><span class="p4-status-chip platform tooltip-container" onmouseenter="showTooltip(event, '签名状态：已验证<br>签名类型：平台代签<br>签名者邮箱：platform-noreply@ccode.example.com<br>公钥 Key ID：54A781F8B3C2D1E0<br>签名算法：RSA-4096')" onmouseleave="hideTooltip()">已验证</span></div></div><div class="p4-right-actions"><button class="p4-hash-btn" onclick="openCommitDetail('platform')"><span style="color:#8FA6C2;">⇢</span><span class="p4-hash">54a781f8</span></button><button class="p4-icon-btn">&#128203;</button><button class="p4-icon-btn">&#8249;/&#8250;</button><button class="p4-more-btn">&#8230;</button></div></div></div>
+                    <div class="p4-commit-card"><div class="p4-commit-row"><div class="p4-commit-main"><span class="p4-commit-msg" onclick="openCommitDetail('unverified')">refactor: optimize PRD template metadata and background section</span><div class="p4-commit-meta"><div class="p4-avatar" style="background:#A0A05E;">T</div><span class="p4-author-name">Tony Chen</span><span class="p4-time-pill">提交于 6 天前</span><span class="p4-status-chip unverified tooltip-container" onmouseenter="showTooltip(event, '签名状态：未验证<br>签名类型：本地签名<br>签名者邮箱：tony@example.com<br>公钥 Key ID：23249EF7A1B2C3D4<br>签名算法：Ed25519<br>原因：未找到匹配公钥')" onmouseleave="hideTooltip()">未验证</span></div></div><div class="p4-right-actions"><button class="p4-hash-btn" onclick="openCommitDetail('unverified')"><span style="color:#8FA6C2;">⇢</span><span class="p4-hash">23249ef7</span></button><button class="p4-icon-btn">&#128203;</button><button class="p4-icon-btn">&#8249;/&#8250;</button><button class="p4-more-btn">&#8230;</button></div></div></div>
+                    <div class="p4-commit-card"><div class="p4-commit-row"><div class="p4-commit-main"><span class="p4-commit-msg" onclick="openCommitDetail('unsigned')">init prd template governance and playbook</span><div class="p4-commit-meta"><div class="p4-avatar" style="background:#A0A05E;">T</div><span class="p4-author-name">Tony Chen</span><span class="p4-time-pill">提交于 6 天前</span><span class="p4-status-chip unsigned tooltip-container" onmouseenter="showTooltip(event, '该提交未包含 GPG 数字签名')" onmouseleave="hideTooltip()">未签名</span></div></div><div class="p4-right-actions"><button class="p4-hash-btn" onclick="openCommitDetail('unsigned')"><span style="color:#8FA6C2;">⇢</span><span class="p4-hash">4ff4a083</span></button><button class="p4-icon-btn">&#128203;</button><button class="p4-icon-btn">&#8249;/&#8250;</button><button class="p4-more-btn">&#8230;</button></div></div></div>
+                    <div class="p4-commit-card"><div class="p4-commit-row"><div class="p4-commit-main"><span class="p4-commit-msg" onclick="openCommitDetail('unsigned')">Add cpack UI design skill</span><div class="p4-commit-meta"><div class="p4-avatar" style="background:#FFB11A;">吴</div><span class="p4-author-name">吴哲慧[hannahwu]</span><span class="p4-time-pill">提交于 2026-04-15</span><span class="p4-status-chip unsigned tooltip-container" onmouseenter="showTooltip(event, '该提交未包含 GPG 数字签名')" onmouseleave="hideTooltip()">未签名</span></div></div><div class="p4-right-actions"><button class="p4-hash-btn" onclick="openCommitDetail('unsigned')"><span style="color:#8FA6C2;">⇢</span><span class="p4-hash">199a866b</span></button><button class="p4-icon-btn">&#128203;</button><button class="p4-icon-btn">&#8249;/&#8250;</button><button class="p4-more-btn">&#8230;</button></div></div></div>
+                    <div class="p4-commit-card"><div class="p4-commit-row"><div class="p4-commit-main"><span class="p4-commit-msg" onclick="openCommitDetail('verified')">Add canway UI design skill</span><div class="p4-commit-meta"><div class="p4-avatar" style="background:#FFB11A;">吴</div><span class="p4-author-name">吴哲慧[hannahwu]</span><span class="p4-time-pill">提交于 2026-04-15</span><span class="p4-status-chip verified tooltip-container" onmouseenter="showTooltip(event, '签名状态：已验证<br>签名类型：本地签名<br>签名者邮箱：hannahwu@example.com<br>公钥 Key ID：ABE9B8EE4F21ACD0<br>签名算法：Ed25519')" onmouseleave="hideTooltip()">已验证</span></div></div><div class="p4-right-actions"><button class="p4-hash-btn" onclick="openCommitDetail('verified')"><span style="color:#8FA6C2;">⇢</span><span class="p4-hash">abe9b8ee</span></button><button class="p4-icon-btn">&#128203;</button><button class="p4-icon-btn">&#8249;/&#8250;</button><button class="p4-more-btn">&#8230;</button></div></div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= PAGE 5 ================= -->
+    <div id="page5" class="page">
+        <style>
+            #page5 {
+                background: #fff;
+                padding-top: 50px;
+                height: 100vh;
+                display: none;
+                flex-direction: column;
+            }
+            #page5.active { display: flex; }
+            #page5 * { box-sizing: border-box; }
+            
+            .p5-header {
+                height: var(--nav-height);
+                background: #fff;
+                border-bottom: 1px solid #DCDEE5;
+                display: flex;
+                align-items: center;
+                padding: 0 16px;
+                flex-shrink: 0;
+            }
+            .p5-repo-selector {
+                font-size: 14px;
+                color: #313238;
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                cursor: pointer;
+            }
+            .p5-header-divider {
+                width: 1px;
+                height: 16px;
+                background: #DCDEE5;
+                margin: 0 16px;
+            }
+            .p5-top-nav {
+                display: flex;
+                height: 100%;
+                align-items: center;
+            }
+            .p5-top-nav-item {
+                height: 100%;
+                display: flex;
+                align-items: center;
+                padding: 0 16px;
+                font-size: 14px;
+                color: #63656E;
+                cursor: pointer;
+                border-bottom: 2px solid transparent;
+            }
+            .p5-top-nav-item.active {
+                color: var(--color-primary);
+                border-bottom-color: var(--color-primary);
+            }
+            .p5-breadcrumb {
+                margin-left: auto;
+                font-size: 12px;
+                color: #979BA5;
+            }
+
+            .p5-body {
+                display: flex;
+                flex: 1;
+                overflow: hidden;
+            }
+            .p5-sidebar {
+                width: var(--sidebar-layout-b-width);
+                background: #F5F7FA;
+                border-right: 1px solid #DCDEE5;
+                flex-shrink: 0;
+                padding: 8px 0;
+                overflow-y: auto;
+            }
+            .p5-nav-item {
+                height: 36px;
+                padding: 0 12px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 12px;
+                color: #63656E;
+                cursor: pointer;
+                border-left: 3px solid transparent;
+            }
+            .p5-nav-item:hover { background: #EAEBF0; }
+            .p5-nav-item.active {
+                background: #E1ECFF;
+                color: var(--color-primary);
+                border-left-color: var(--color-primary);
+            }
+            .p5-nav-icon {
+                width: 16px; height: 16px;
+                background: #C4C6CC;
+                border-radius: 2px;
+                display: inline-block;
+            }
+            .p5-nav-item.active .p5-nav-icon { background: var(--color-primary); }
+
+            .p5-content { flex: 1; background: #F5F7FA; padding: 18px 26px 24px; overflow-y: auto; }
+            .p5-summary-card { background: #fff; border: 1px solid #E7EDF4; border-radius: 8px; padding: 22px 28px; margin-bottom: 14px; }
+            .p5-summary-top { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+            .p5-summary-main { flex: 1; min-width: 0; }
+            .p5-commit-title { font-size: 18px; font-weight: 600; color: #132B50; margin-bottom: 16px; line-height: 28px; }
+            .p5-commit-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; font-size: 12px; color: #63656E; }
+            .p5-avatar { width: 32px; height: 32px; border-radius: 50%; background: #A0A05E; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 600; }
+            .p5-author-name { font-size: 16px; color: #132B50; font-weight: 600; }
+            .p5-time-pill { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 12px; background: #fff; color: #7E8A9A; border: 1px solid #DDE6F0; }
+            .p5-hash-button { min-width: 168px; height: 40px; padding: 0 14px; border: 1px solid #D9E2EC; border-radius: 8px; background: #fff; display: inline-flex; align-items: center; justify-content: space-between; gap: 12px; color: #1C3D66; }
+            .p5-hash { font-family: monospace; color: #1C3D66; }
+            .p5-summary-extra { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+            .p5-summary-icon { width: 40px; height: 40px; border: 1px solid #D9E2EC; border-radius: 8px; background: #fff; display: inline-flex; align-items: center; justify-content: center; color: #1C3D66; cursor: pointer; }
+            .p5-signature-tag { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 14px; font-size: 12px; border: 1px solid #B6E7C7; background: #E7F6ED; color: #11824A; cursor: pointer; }
+            .p5-signature-tag.failed { border-color: #FFD48D; background: #FFF4E2; color: #B77914; }
+            .p5-signature-tag.unsigned { border-color: #D9E2EC; background: #F5F7FA; color: #7A8798; }
+            .p5-signature-tag.platform { border-color: #B8D0FF; background: #E1ECFF; color: #0153CC; }
+            .p5-stats-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; background: #fff; border: 1px solid #E7EDF4; border-radius: 8px 8px 0 0; padding: 14px 28px; border-bottom: none; }
+            .p5-stats-left { display: flex; align-items: center; gap: 10px; color: #63656E; }
+            .p5-stats-number { display: inline-flex; align-items: center; justify-content: center; min-width: 36px; height: 28px; padding: 0 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+            .p5-stats-number.add { background: #E7F6ED; color: var(--color-success); }
+            .p5-stats-number.del { background: #FFEDEC; color: var(--color-danger); }
+            .p5-workspace { display: flex; min-height: 560px; border: 1px solid #E7EDF4; border-radius: 0 0 8px 8px; overflow: hidden; background: #fff; }
+            .p5-file-tree { width: 350px; border-right: 1px solid #E7EDF4; background: #FBFCFE; padding: 14px 16px; }
+            .p5-tree-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+            .p5-tree-search { display: flex; align-items: center; height: 36px; flex: 1; border: 1px solid #D9E2EC; border-radius: 6px; background: #fff; padding: 0 10px; color: #97A6B5; font-size: 12px; }
+            .p5-tree-action { width: 32px; height: 32px; border: 1px solid #D9E2EC; border-radius: 6px; background: #fff; display: inline-flex; align-items: center; justify-content: center; color: #60758C; }
+            .p5-file-group { margin-bottom: 14px; }
+            .p5-file-folder { display: flex; align-items: center; gap: 8px; font-weight: 600; color: #1C3D66; margin-bottom: 10px; }
+            .p5-file-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 6px; color: #31445A; cursor: pointer; }
+            .p5-file-item.active { background: #F0F5FF; }
+            .p5-file-name { display: flex; align-items: center; gap: 8px; }
+            .p5-file-badges { display: flex; align-items: center; gap: 6px; }
+            .p5-file-diff { display: inline-flex; align-items: center; justify-content: center; min-width: 38px; height: 24px; padding: 0 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+            .p5-file-diff.add { background: #E7F6ED; color: var(--color-success); }
+            .p5-file-diff.del { background: #FFEDEC; color: var(--color-danger); }
+            .p5-diff-area { flex: 1; background: #fff; padding: 0; overflow: auto; }
+            .p5-diff-card { border-bottom: 1px solid #E7EDF4; }
+            .p5-diff-header { padding: 14px 18px; background: #C7D2E1; border-bottom: 1px solid #AEBFD4; font-weight: 600; font-size: 14px; color: #193B63; }
+            .p5-diff-body { padding: 0; font-family: monospace; font-size: 12px; line-height: 24px; background: #fff; }
+            .p5-diff-row { display: grid; grid-template-columns: 56px 56px 1fr; border-bottom: 1px solid #EEF2F6; }
+            .p5-diff-num { padding: 0 12px; color: #7B8DA1; background: #F7FAFD; }
+            .p5-diff-add { color: var(--color-success); background: #F2FFF4; display: block; padding: 0 14px; }
+            .p5-diff-del { color: var(--color-danger); background: #FFF3F2; display: block; padding: 0 14px; }
+            .p5-diff-ctx { color: #31445A; padding: 0 14px; }
+
+            .p5-demo-bar {
+                background: #FFFCE6;
+                border: 1px solid #FFE163;
+                border-radius: 4px;
+                padding: 8px 12px;
+                margin-bottom: 16px;
+                font-size: 12px;
+                color: #313238;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .p5-demo-btn {
+                background: #fff;
+                border: 1px solid #DCDEE5;
+                border-radius: 2px;
+                padding: 2px 8px;
+                cursor: pointer;
+                font-size: 12px;
+            }
+            .p5-demo-btn:hover { background: #F5F7FA; }
+        </style>
+
+        <div class="p5-header">
+            <div class="p5-repo-selector">
+                BK1/khh1-... <span style="font-size: 10px;">&#9662;</span>
+            </div>
+            <div class="p5-header-divider"></div>
+            <div class="p5-top-nav">
+                <div class="p5-top-nav-item">代码</div>
+                <div class="p5-top-nav-item active">提交</div>
+                <div class="p5-top-nav-item">分支</div>
+                <div class="p5-top-nav-item">合并请求</div>
+                <div class="p5-top-nav-item">成员</div>
+                <div class="p5-top-nav-item">设置</div>
+                <div class="p5-top-nav-item">仓库总览</div>
+            </div>
+            <div class="p5-breadcrumb">代码库 / 提交 / a1b2c3d4</div>
+        </div>
+
+        <div class="p5-body">
+            <div class="p5-sidebar">
+                <div class="p5-nav-item"><span class="p5-nav-icon"></span>代码浏览</div>
+                <div class="p5-nav-item active"><span class="p5-nav-icon"></span>提交记录</div>
+                <div class="p5-nav-item"><span class="p5-nav-icon"></span>分支</div>
+                <div class="p5-nav-item"><span class="p5-nav-icon"></span>标签</div>
+            </div>
+
+            <div class="p5-content">
+                <div class="p5-demo-bar"><strong>[原型演示辅助] 切换本页显示的签名状态：</strong><button class="p5-demo-btn" onclick="p5SwitchState('verified')">已验证(本地签名)</button><button class="p5-demo-btn" onclick="p5SwitchState('platform')">已验证(平台代签)</button><button class="p5-demo-btn" onclick="p5SwitchState('unverified')">未验证</button><button class="p5-demo-btn" onclick="p5SwitchState('unsigned')">未签名</button></div>
+
+                <div class="p5-summary-card">
+                    <div class="p5-summary-top">
+                        <div class="p5-summary-main">
+                            <div class="p5-commit-title">docs: unify background keywords across all template documents</div>
+                            <div class="p5-commit-meta">
+                                <div class="p5-avatar">T</div>
+                                <span class="p5-author-name">Tony Chen</span>
+                                <span class="p5-time-pill">6 天前</span>
+                                <button class="p5-hash-button"><span style="color:#8FA6C2;">⇢</span><span class="p5-hash">11884d78</span></button>
+                                <span>|</span>
+                                <span>1 parent：<a href="#" style="color:var(--color-primary);font-family:monospace;">54a781f8fea0e65b5e3c99c00e37e72dae38fc3d</a></span>
+                                <span id="p5-signature-tag" class="p5-signature-tag" onmouseenter="p5ShowSignaturePopover(event)" onmouseleave="p5DelayedHideSignaturePopover()" onclick="p5ToggleSignaturePopover(event)"><span>●</span><span id="p5-signature-tag-text">已验证</span></span>
+                            </div>
+                        </div>
+                        <div class="p5-summary-extra"><button class="p5-summary-icon">&#128203;</button><button class="p5-summary-icon">&#8230;</button></div>
+                    </div>
+                </div>
+
+                <div class="p5-stats-bar"><div class="p5-stats-left"><span style="font-size: 16px; color:#2D4668;">4 个文件被修改，影响行数：</span><span class="p5-stats-number add">+4</span><span class="p5-stats-number del">-4</span></div><button class="btn" style="height: 40px;">⇌ 切换左右模式</button></div>
+
+                <div class="p5-workspace">
+                    <div class="p5-file-tree">
+                        <div class="p5-tree-toolbar"><div class="p5-tree-search">&#128269;　请输入关键字回车搜索</div><div class="p5-tree-action">⮞</div><div class="p5-tree-action">☰</div></div>
+                        <div class="p5-file-group">
+                            <div class="p5-file-folder">📁 /template</div>
+                            <div class="p5-file-item active"><div class="p5-file-name">⇄ PRD模板.md</div><div class="p5-file-badges"><span class="p5-file-diff add">+1</span><span class="p5-file-diff del">-1</span></div></div>
+                            <div class="p5-file-item"><div class="p5-file-name">⇄ README.md</div><div class="p5-file-badges"><span class="p5-file-diff add">+1</span><span class="p5-file-diff del">-1</span></div></div>
+                            <div class="p5-file-item"><div class="p5-file-name">⇄ prd-governance.md</div><div class="p5-file-badges"><span class="p5-file-diff add">+1</span><span class="p5-file-diff del">-1</span></div></div>
+                            <div class="p5-file-item"><div class="p5-file-name">⇄ prd-playbook.md</div><div class="p5-file-badges"><span class="p5-file-diff add">+1</span><span class="p5-file-diff del">-1</span></div></div>
+                        </div>
+                    </div>
+                    <div class="p5-diff-area">
+                        <div class="p5-diff-card">
+                            <div class="p5-diff-header">template/PRD模板.md</div>
+                            <div class="p5-diff-body">
+                                <div class="p5-diff-row"><div class="p5-diff-num">46</div><div class="p5-diff-num">46</div><span class="p5-diff-del">- &gt; 一 以上三项必填，须分别标注“产品现状”“问题或影响”“目标”关键词。</span></div>
+                                <div class="p5-diff-row"><div class="p5-diff-num">46</div><div class="p5-diff-num">46</div><span class="p5-diff-add">+ &gt; 一 以上三项必填，须分别标注“产品现状”“问题或影响”“本需求想要达到的目标”关键词。</span></div>
+                                <div class="p5-diff-row"><div class="p5-diff-num">47</div><div class="p5-diff-num">47</div><span class="p5-diff-ctx">  &gt; 一 若三项内容紧密关联，可在一段内连贯书写，但须确保评审时三项要素均可定位。</span></div>
+                                <div class="p5-diff-row"><div class="p5-diff-num">48</div><div class="p5-diff-num">48</div><span class="p5-diff-ctx">  &gt; 一 示例：当前审批记录仅支持按时间倒序查看，缺少项目维度过滤……</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            const p5SignatureStateMap = {
+                verified: { tagText: '已验证', tagClass: 'p5-signature-tag', title: '已验证（本地签名）', detail: '<div class="signature-popover-grid"><div>签名者</div><strong>Tony Chen &lt;tony.chen@example.com&gt;</strong><div>Key ID</div><strong>3AA5C34371567BD2</strong><div>指纹</div><strong>A1B2 C3D4 E5F6 7890 1122 3344 5566 7788 99AA BBCC</strong><div>算法</div><strong>RSA 4096</strong><div>签名时间</div><strong>2026-04-22 10:32:16</strong></div><div class="signature-popover-desc">该提交使用用户本地 GPG 密钥完成签名，平台验证通过。</div>' },
+                platform: { tagText: '已验证', tagClass: 'p5-signature-tag platform', title: '已验证（平台代签）', detail: '<div class="signature-popover-grid"><div>签名者</div><strong>CCode Signing Bot</strong><div>Key ID</div><strong>54A7 81F8 FEA0</strong><div>指纹</div><strong>54A7 81F8 FEA0 E65B 5E3C 99C0 00E3 7E72 DAE3 8FC3</strong><div>算法</div><strong>RSA 4096</strong><div>签名时间</div><strong>2026-04-22 10:35:02</strong></div><div class="signature-popover-desc">该提交通过平台托管签名流程完成验证，标签仍统一显示为“已验证”，通过浮层区分来源。</div>' },
+                unverified: { tagText: '未验证', tagClass: 'p5-signature-tag failed', title: '未验证', detail: '<div class="signature-popover-grid"><div>失败原因</div><strong>未找到匹配公钥</strong><div>提交邮箱</div><strong>tony.chen@example.com</strong><div>建议处理</div><strong>上传对应公钥后重试</strong></div><div class="signature-popover-desc">提交存在签名，但当前平台无法匹配到用户已绑定的 GPG 公钥。</div>' },
+                unsigned: { tagText: '未签名', tagClass: 'p5-signature-tag unsigned', title: '该提交未包含签名', detail: '<div class="signature-popover-grid"><div>提交状态</div><strong>Unsigned commit</strong><div>说明</div><strong>当前提交未携带 GPG 数字签名</strong></div><div class="signature-popover-desc">如需获得身份验证标记，请在本地配置 GPG 签名后重新提交。</div>' }
+            };
+            let p5CurrentState = 'verified';
+            let p5PopoverTimer = null;
+            function p5SwitchState(state) {
+                p5CurrentState = state;
+                const tag = document.getElementById('p5-signature-tag');
+                const text = document.getElementById('p5-signature-tag-text');
+                const config = p5SignatureStateMap[state];
+                tag.className = config.tagClass;
+                text.innerText = config.tagText;
+                p5RenderSignaturePopover();
+            }
+            function p5RenderSignaturePopover() {
+                const popover = document.getElementById('p5-signature-popover');
+                const title = document.getElementById('p5-signature-popover-title');
+                const body = document.getElementById('p5-signature-popover-body');
+                const config = p5SignatureStateMap[p5CurrentState];
+                popover.className = 'signature-popover';
+                if (p5CurrentState === 'unverified') popover.classList.add('warning');
+                if (p5CurrentState === 'unsigned') popover.classList.add('unsigned');
+                title.innerText = config.title;
+                body.innerHTML = config.detail;
+            }
+            function p5PositionSignaturePopover(target) {
+                const popover = document.getElementById('p5-signature-popover');
+                const rect = target.getBoundingClientRect();
+                popover.style.top = (rect.bottom + 10) + 'px';
+                popover.style.left = Math.min(rect.left, window.innerWidth - 340) + 'px';
+            }
+            function p5ShowSignaturePopover(e) { clearTimeout(p5PopoverTimer); p5RenderSignaturePopover(); const popover = document.getElementById('p5-signature-popover'); p5PositionSignaturePopover(e.currentTarget); popover.classList.add('show'); }
+            function p5HideSignaturePopover() { document.getElementById('p5-signature-popover').classList.remove('show'); }
+            function p5DelayedHideSignaturePopover() { clearTimeout(p5PopoverTimer); p5PopoverTimer = setTimeout(p5HideSignaturePopover, 120); }
+            function p5ToggleSignaturePopover(e) { e.stopPropagation(); const popover = document.getElementById('p5-signature-popover'); if (popover.classList.contains('show')) { p5HideSignaturePopover(); } else { p5ShowSignaturePopover(e); } }
+        </script>
+    </div>
+
+
+    <!-- ================= MODALS ================= -->
+    
+    <!-- Modal: Add GPG Key -->
+    <div class="modal-mask" id="mask-add-key" onclick="closeModal('modal-add-key')"></div>
+    <div class="modal" id="modal-add-key" style="display: none;">
+        <div class="modal-header">
+            <span>添加 GPG 公钥</span>
+            <button class="modal-close" onclick="closeModal('modal-add-key')">&#x2715;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label class="form-label">公钥内容 (Armored 格式)</label>
+                <textarea class="form-control" id="gpg-textarea" placeholder="-----BEGIN PGP PUBLIC KEY BLOCK-----&#10;...&#10;-----END PGP PUBLIC KEY BLOCK-----" oninput="handleGpgInput()"></textarea>
+            </div>
+            <!-- Preview area simulated -->
+            <div id="gpg-preview-area" style="display: none; background: #F5F9FF; padding: 12px; border-radius: var(--radius); border: 1px solid #E1ECFF; font-size: 12px;">
+                <div style="font-weight: bold; color: var(--color-primary); margin-bottom: 8px;">解析成功：</div>
+                <div><strong>关联邮箱：</strong> <span id="preview-email">user@example.com</span></div>
+                <div><strong>Key ID：</strong> <span id="preview-id">ABC123XYZ0000</span></div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn" onclick="closeModal('modal-add-key')">取消</button>
+            <button class="btn btn-primary" id="btn-add-key-confirm" disabled onclick="saveMock('公钥添加成功'); closeModal('modal-add-key')">确定</button>
+        </div>
+    </div>
+
+    <!-- Modal: Delete Confirm -->
+    <div class="modal-mask" id="mask-del-key" onclick="closeModal('modal-del-key')"></div>
+    <div class="modal" id="modal-del-key" style="display: none; width: 400px;">
+        <div class="modal-header">
+            <span>删除确认</span>
+            <button class="modal-close" onclick="closeModal('modal-del-key')">&#x2715;</button>
+        </div>
+        <div class="modal-body">
+            <p>确定要删除此 GPG 公钥吗？删除后，使用该密钥签名的历史 Commit 状态可能会变更为“未验证”。</p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn" onclick="closeModal('modal-del-key')">取消</button>
+            <button class="btn btn-danger" onclick="executeDelete()">确认删除</button>
+        </div>
+    </div>
+
+    <!-- Modal: Generate Guide -->
+    <div class="modal-mask" id="mask-guide" onclick="closeModal('modal-guide')"></div>
+    <div class="modal" id="modal-guide" style="display: none; width: 560px;">
+        <div class="modal-header">
+            <span>如何生成 GPG 公钥？</span>
+            <button class="modal-close" onclick="closeModal('modal-guide')">&#x2715;</button>
+        </div>
+        <div class="modal-body">
+            <p class="mb-20">请在您的本地终端执行以下命令生成 GPG 密钥对，并导出公钥上传至 CCode。</p>
+            
+            <div class="form-label" style="font-weight: bold;">1. 生成 GPG 密钥对</div>
+            <div class="code-block">
+                <code>gpg --full-generate-key</code>
+                <button class="btn" style="height:24px; padding:0 8px; font-size:12px;" onclick="copyCode(this)">复制</button>
+            </div>
+            
+            <div class="form-label mt-10" style="font-weight: bold;">2. 列出 GPG 密钥以获取 Key ID</div>
+            <div class="code-block">
+                <code>gpg --list-secret-keys --keyid-format=long</code>
+                <button class="btn" style="height:24px; padding:0 8px; font-size:12px;" onclick="copyCode(this)">复制</button>
+            </div>
+            <p class="text-sm text-muted" style="line-height: 20px; margin-top: -2px;">执行后找到以 <code>sec</code> 开头的那一行，复制其中的 GPG 密钥 ID（通常是斜杠 <code>/</code> 后的一段，如 <code>rsa4096/3AA5C34371567BD2</code> 中的 <code>3AA5C34371567BD2</code>）。</p>
+
+            <div class="form-label mt-10" style="font-weight: bold;">3. 导出公钥 (替换 [Key ID])</div>
+            <div class="code-block">
+                <code>gpg --armor --export [Key ID]</code>
+                <button class="btn" style="height:24px; padding:0 8px; font-size:12px;" onclick="copyCode(this)">复制</button>
+            </div>
+            
+            <div class="form-label mt-10" style="font-weight: bold;">4. 配置 Git 使用 GPG 签名</div>
+            <div class="code-block" style="margin-bottom: 0;">
+                <code>git config --global user.signingkey [Key ID]<br>git config --global commit.gpgsign true</code>
+                <button class="btn" style="height:24px; padding:0 8px; font-size:12px;" onclick="copyCode(this)">复制</button>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-primary" onclick="closeModal('modal-guide')">我知道了</button>
+        </div>
+    </div>
+
+    <!-- Modal: Sys Toggle Confirm -->
+    <div class="modal-mask" id="mask-sys-confirm" onclick="cancelSysToggle()"></div>
+    <div class="modal" id="modal-sys-confirm" style="display: none; width: 400px;">
+        <div class="modal-header">
+            <span>开启全局校验确认</span>
+            <button class="modal-close" onclick="cancelSysToggle()">&#x2715;</button>
+        </div>
+        <div class="modal-body">
+            <p class="text-warning mb-10" style="font-weight: bold;">⚠ 风险提示</p>
+            <p>全局强制开启后，所有代码库都将应用 GPG 签名校验规则。强管控模式可能会阻断开发者正常的代码推送流程。</p>
+            <p class="mt-10">建议先使用“审计模式”进行平滑过渡。确认要继续开启吗？</p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn" onclick="cancelSysToggle()">取消</button>
+            <button class="btn btn-primary" onclick="p3ConfirmToggle()">确认开启</button>
+        </div>
+    </div>
+
+
+    <!-- Global Tooltip Element -->
+    <div id="global-tooltip" class="tooltip"></div>
+    <div id="p5-signature-popover" class="signature-popover" onmouseenter="clearTimeout(p5PopoverTimer)" onmouseleave="p5DelayedHideSignaturePopover()">
+        <div class="signature-popover-title"><span class="signature-popover-dot"></span><span id="p5-signature-popover-title">GPG 签名校验通过</span></div>
+        <div id="p5-signature-popover-body"></div>
+    </div>
+
+
+<script>
+    // === Router / Tab Logic ===
+    function showPage(pageId) {
+        // 切换页签时关闭所有弹窗和遮罩
+        document.querySelectorAll('[id^="modal-"],[id^="mask-"]').forEach(el => el.style.display = 'none');
+        if (typeof p5HideSignaturePopover === 'function') p5HideSignaturePopover();
+
+        document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.proto-tab').forEach(el => el.classList.remove('active'));
+        
+        document.getElementById(pageId).classList.add('active');
+        const targetTab = document.querySelector('.proto-tab[data-target="' + pageId + '"]');
+        if (targetTab) targetTab.classList.add('active');
+    }
+
+    // === Modal Logic ===
+    function openModal(id) {
+        document.getElementById(id).style.display = 'flex';
+        // The mask ID is matching 'mask-' + id part
+        let maskId = id.replace('modal-', 'mask-');
+        if (document.getElementById(maskId)) {
+            document.getElementById(maskId).style.display = 'block';
+        }
+    }
+    
+    function closeModal(id) {
+        document.getElementById(id).style.display = 'none';
+        let maskId = id.replace('modal-', 'mask-');
+        if (document.getElementById(maskId)) {
+            document.getElementById(maskId).style.display = 'none';
+        }
+    }
+
+    // === Page 1: GPG Key Add & Delete ===
+    function handleGpgInput() {
+        const val = document.getElementById('gpg-textarea').value.trim();
+        const btn = document.getElementById('btn-add-key-confirm');
+        const preview = document.getElementById('gpg-preview-area');
+        
+        if (val.length > 0) {
+            btn.disabled = false;
+            preview.style.display = 'block';
+        } else {
+            btn.disabled = true;
+            preview.style.display = 'none';
+        }
+    }
+
+    let rowToDelete = null;
+    function confirmDelete(rowId) {
+        rowToDelete = rowId;
+        openModal('modal-del-key');
+    }
+    
+    function executeDelete() {
+        if (rowToDelete) {
+            document.getElementById(rowToDelete).remove();
+            rowToDelete = null;
+            closeModal('modal-del-key');
+            alertMock('已删除');
+        }
+    }
+
+    function copyCode(btn) {
+        btn.innerText = '已复制';
+        btn.classList.add('text-success');
+        setTimeout(() => {
+            btn.innerText = '复制';
+            btn.classList.remove('text-success');
+        }, 1500);
+    }
+
+    // === Shared global state ===
+    let isGlobalForced = false;
+
+    function cancelSysToggle() {
+        p3PendingToggle = false;
+        closeModal('modal-sys-confirm');
+    }
+
+    // === Page 4: Tooltips ===
+    const tooltipElem = document.getElementById('global-tooltip');
+    function showTooltip(e, text) {
+        tooltipElem.innerHTML = text;
+        tooltipElem.classList.add('show');
+        
+        // Calculate position
+        const rect = e.target.getBoundingClientRect();
+        let top = rect.top - tooltipElem.offsetHeight - 8;
+        let left = rect.left + (rect.width / 2) - (tooltipElem.offsetWidth / 2);
+        
+        // Boundaries
+        if (left < 10) left = 10;
+        if (left + tooltipElem.offsetWidth > window.innerWidth - 10) {
+            left = window.innerWidth - tooltipElem.offsetWidth - 10;
+        }
+        
+        tooltipElem.style.top = top + 'px';
+        tooltipElem.style.left = left + 'px';
+    }
+
+    function hideTooltip() {
+        tooltipElem.classList.remove('show');
+    }
+
+    function openCommitDetail(state) {
+        showPage('page5');
+        if (typeof p5SwitchState === 'function') p5SwitchState(state);
+    }
+
+    // Mock save function
+    function saveMock(msg) {
+        // Create an ephemeral toast
+        const toast = document.createElement('div');
+        toast.style.cssText = 'position: fixed; top: 120px; left: 50%; transform: translateX(-50%); background: var(--color-success); color: white; padding: 10px 20px; border-radius: 4px; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.1);';
+        toast.innerText = msg;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 2000);
+    }
+    function alertMock(msg) {
+        saveMock(msg);
+    }
+
+</script>
+</body>
+</html>
